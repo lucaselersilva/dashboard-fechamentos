@@ -28,32 +28,40 @@ function widthPercent(value: number, max: number) {
   return `${Math.max(10, (value / max) * 100)}%`;
 }
 
-function FilterSelect({
+function FilterGroup({
   label,
-  value,
-  onChange,
   options,
+  selected,
+  onToggle,
 }: {
   label: string;
-  value: string;
-  onChange: (value: string) => void;
   options: string[];
+  selected: string[];
+  onToggle: (value: string) => void;
 }) {
   return (
-    <label className="grid gap-2">
-      <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{label}</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-sky-400"
-      >
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="grid gap-2">
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{label}</p>
+      <div className="flex flex-wrap gap-2">
+        {options.map((option) => {
+          const isActive = selected.includes(option);
+          return (
+            <button
+              key={option}
+              type="button"
+              onClick={() => onToggle(option)}
+              className={`rounded-full px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${
+                isActive
+                  ? "bg-slate-950 text-white shadow-[0_10px_30px_rgba(15,23,42,0.2)]"
+                  : "bg-white/80 text-slate-600 hover:bg-white"
+              }`}
+            >
+              {option}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -80,37 +88,49 @@ function StatCard({
 export function DashboardClient({ data }: { data: DashboardData }) {
   const router = useRouter();
   const [activeView, setActiveView] = useState<"operacao" | "comissionamento">("operacao");
-  const [unitFilter, setUnitFilter] = useState("Todas");
-  const [monthFilter, setMonthFilter] = useState("Todos");
-  const [paymentFilter, setPaymentFilter] = useState("Todos");
-  const [categoryFilter, setCategoryFilter] = useState("Todos");
+  const [selectedUnits, setSelectedUnits] = useState<string[]>([]);
+  const [selectedMonths, setSelectedMonths] = useState<string[]>([]);
+  const [selectedPayments, setSelectedPayments] = useState<string[]>([]);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [uploadUnit, setUploadUnit] = useState<UnitName>("Aguas Claras");
   const [uploadMessage, setUploadMessage] = useState("");
   const [isUploading, setIsUploading] = useState(false);
 
   const unitOptions = useMemo(
-    () => ["Todas", ...Array.from(new Set(data.sales.map((sale) => sale.unit))).sort((a, b) => a.localeCompare(b, "pt-BR"))],
+    () => Array.from(new Set(data.sales.map((sale) => sale.unit))).sort((a, b) => a.localeCompare(b, "pt-BR")),
     [data.sales],
   );
   const monthOptions = useMemo(
-    () => ["Todos", ...Array.from(new Set(data.sales.map((sale) => `${sale.monthKey}|${sale.monthLabel}`)))
-      .sort((a, b) => a.localeCompare(b, "pt-BR"))
-      .map((entry) => entry.split("|")[1])],
+    () =>
+      Array.from(new Set(data.sales.map((sale) => `${sale.monthKey}|${sale.monthLabel}`)))
+        .sort((a, b) => a.localeCompare(b, "pt-BR"))
+        .map((entry) => entry.split("|")[1]),
     [data.sales],
   );
   const paymentOptions = useMemo(
-    () => ["Todos", ...Array.from(new Set(data.sales.map((sale) => sale.paymentMethod))).sort((a, b) => a.localeCompare(b, "pt-BR"))],
+    () => Array.from(new Set(data.sales.map((sale) => sale.paymentMethod))).sort((a, b) => a.localeCompare(b, "pt-BR")),
     [data.sales],
   );
+  const categoryOptions = useMemo(() => ["avista", "prazo"], []);
+
+  function toggleSelection(
+    value: string,
+    selected: string[],
+    setSelected: (values: string[]) => void,
+  ) {
+    setSelected(
+      selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value],
+    );
+  }
 
   const filteredSales = useMemo(() => {
     const term = search.trim().toLowerCase();
     return data.sales.filter((sale) => {
-      if (unitFilter !== "Todas" && sale.unit !== unitFilter) return false;
-      if (monthFilter !== "Todos" && sale.monthLabel !== monthFilter) return false;
-      if (paymentFilter !== "Todos" && sale.paymentMethod !== paymentFilter) return false;
-      if (categoryFilter !== "Todos" && sale.paymentCategory !== categoryFilter) return false;
+      if (selectedUnits.length > 0 && !selectedUnits.includes(sale.unit)) return false;
+      if (selectedMonths.length > 0 && !selectedMonths.includes(sale.monthLabel)) return false;
+      if (selectedPayments.length > 0 && !selectedPayments.includes(sale.paymentMethod)) return false;
+      if (selectedCategories.length > 0 && !selectedCategories.includes(sale.paymentCategory)) return false;
       if (
         term &&
         !`${sale.id} ${sale.customer} ${sale.planLabel} ${sale.paymentMethod}`.toLowerCase().includes(term)
@@ -119,7 +139,7 @@ export function DashboardClient({ data }: { data: DashboardData }) {
       }
       return true;
     });
-  }, [categoryFilter, data.sales, monthFilter, paymentFilter, search, unitFilter]);
+  }, [data.sales, search, selectedCategories, selectedMonths, selectedPayments, selectedUnits]);
 
   const summary = useMemo(() => {
     const totals = filteredSales.reduce(
@@ -328,12 +348,12 @@ export function DashboardClient({ data }: { data: DashboardData }) {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.85),_transparent_32%),linear-gradient(160deg,#fff7ed_0%,#fef3c7_20%,#eff6ff_55%,#f8fafc_100%)]">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.9),_transparent_35%),linear-gradient(150deg,#e2e8f0_0%,#f8fafc_40%,#eff6ff_70%,#f1f5f9_100%)]">
       <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 py-8 sm:px-6 lg:px-8">
-        <section className="overflow-hidden rounded-[36px] border border-white/60 bg-[linear-gradient(135deg,#020617_0%,#0f172a_50%,#0f766e_100%)] px-6 py-8 text-white shadow-[0_30px_100px_rgba(15,23,42,0.28)] sm:px-8">
-          <div className="grid gap-8 lg:grid-cols-[1.35fr_0.95fr]">
+        <section className="overflow-hidden rounded-[40px] border border-slate-200 bg-[linear-gradient(135deg,#0f172a_0%,#1e293b_50%,#0f766e_100%)] px-6 py-8 text-white shadow-[0_40px_120px_rgba(15,23,42,0.28)] sm:px-8">
+          <div className="grid gap-8 lg:grid-cols-[1.4fr_0.9fr]">
             <div>
-              <p className="text-sm font-medium uppercase tracking-[0.3em] text-amber-200">Dashboard Interativo</p>
+              <p className="text-sm font-medium uppercase tracking-[0.3em] text-amber-200">BI Financeiro</p>
               <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-tight sm:text-5xl">
                 Explore vendas, pontos e recebiveis com filtros em tempo real.
               </h1>
@@ -341,16 +361,31 @@ export function DashboardClient({ data }: { data: DashboardData }) {
                 Ajuste unidade, mes, pagamento e tipo de recebimento para ler a operacao do jeito que fizer mais sentido na analise.
               </p>
             </div>
-            <div className="rounded-[28px] border border-white/10 bg-white/8 p-5 backdrop-blur">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <FilterSelect label="Unidade" value={unitFilter} onChange={setUnitFilter} options={unitOptions} />
-                <FilterSelect label="Mes" value={monthFilter} onChange={setMonthFilter} options={monthOptions} />
-                <FilterSelect label="Pagamento" value={paymentFilter} onChange={setPaymentFilter} options={paymentOptions} />
-                <FilterSelect
-                  label="Categoria"
-                  value={categoryFilter}
-                  onChange={setCategoryFilter}
-                  options={["Todos", "avista", "prazo"]}
+            <div className="rounded-[28px] border border-white/10 bg-white/10 p-5 backdrop-blur">
+              <div className="grid gap-5">
+                <FilterGroup
+                  label="Unidades (multi)"
+                  options={unitOptions}
+                  selected={selectedUnits}
+                  onToggle={(value) => toggleSelection(value, selectedUnits, setSelectedUnits)}
+                />
+                <FilterGroup
+                  label="Meses (multi)"
+                  options={monthOptions}
+                  selected={selectedMonths}
+                  onToggle={(value) => toggleSelection(value, selectedMonths, setSelectedMonths)}
+                />
+                <FilterGroup
+                  label="Pagamentos (multi)"
+                  options={paymentOptions}
+                  selected={selectedPayments}
+                  onToggle={(value) => toggleSelection(value, selectedPayments, setSelectedPayments)}
+                />
+                <FilterGroup
+                  label="Categoria (multi)"
+                  options={categoryOptions}
+                  selected={selectedCategories}
+                  onToggle={(value) => toggleSelection(value, selectedCategories, setSelectedCategories)}
                 />
               </div>
               <label className="mt-4 grid gap-2">
@@ -368,12 +403,25 @@ export function DashboardClient({ data }: { data: DashboardData }) {
               <div className="mt-4 rounded-[24px] border border-white/10 bg-black/20 p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">Upload de planilha</p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-[0.8fr_1.2fr]">
-                  <FilterSelect
-                    label="Base"
-                    value={uploadUnit}
-                    onChange={(value) => setUploadUnit(value as UnitName)}
-                    options={["Aguas Claras", "Joquei Clube", "Itororo"]}
-                  />
+                  <div className="grid gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">Base</span>
+                    <div className="flex flex-wrap gap-2">
+                      {(["Aguas Claras", "Joquei Clube", "Itororo"] as UnitName[]).map((unit) => (
+                        <button
+                          key={unit}
+                          type="button"
+                          onClick={() => setUploadUnit(unit)}
+                          className={`rounded-full px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${
+                            uploadUnit === unit
+                              ? "bg-amber-200 text-slate-950"
+                              : "bg-white/10 text-slate-200 hover:bg-white/20"
+                          }`}
+                        >
+                          {unit}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <label className="grid gap-2">
                     <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300">Arquivo</span>
                     <input
