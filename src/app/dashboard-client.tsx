@@ -79,6 +79,7 @@ function StatCard({
 
 export function DashboardClient({ data }: { data: DashboardData }) {
   const router = useRouter();
+  const [activeView, setActiveView] = useState<"operacao" | "comissionamento">("operacao");
   const [unitFilter, setUnitFilter] = useState("Todas");
   const [monthFilter, setMonthFilter] = useState("Todos");
   const [paymentFilter, setPaymentFilter] = useState("Todos");
@@ -205,6 +206,81 @@ export function DashboardClient({ data }: { data: DashboardData }) {
   const maxMonthlyRevenue = Math.max(...summary.monthly.map((item) => item.revenue), 0);
   const maxPaymentRevenue = Math.max(...summary.payments.map((item) => item.revenue), 0);
 
+  const commission = useMemo(() => {
+    const rows = filteredSales.map((sale) => {
+      const monthlyValue = sale.expectedAmount / 12;
+      const isImmediate =
+        sale.paymentMethod === "A vista" ||
+        sale.paymentMethod === "Misto" ||
+        sale.paymentMethod === "Cartao de credito";
+
+      const firstMonthCommission = isImmediate
+        ? monthlyValue * 0.35
+        : sale.paymentCategory === "prazo"
+          ? monthlyValue * 0.2
+          : 0;
+      const seventhMonthCommission = isImmediate
+        ? 0
+        : sale.paymentCategory === "prazo"
+          ? monthlyValue * 0.1
+          : 0;
+
+      return {
+        ...sale,
+        monthlyValue,
+        firstMonthCommission,
+        seventhMonthCommission,
+        totalCommission: firstMonthCommission + seventhMonthCommission,
+      };
+    });
+
+    const totals = rows.reduce(
+      (acc, row) => {
+        acc.monthlyValue += row.monthlyValue;
+        acc.firstMonthCommission += row.firstMonthCommission;
+        acc.seventhMonthCommission += row.seventhMonthCommission;
+        acc.totalCommission += row.totalCommission;
+        return acc;
+      },
+      {
+        monthlyValue: 0,
+        firstMonthCommission: 0,
+        seventhMonthCommission: 0,
+        totalCommission: 0,
+      },
+    );
+
+    const monthlyMap = new Map<
+      string,
+      { monthKey: string; monthLabel: string; sales: number; monthlyValue: number; firstMonthCommission: number; seventhMonthCommission: number; totalCommission: number }
+    >();
+
+    for (const row of rows) {
+      const current = monthlyMap.get(row.monthKey) ?? {
+        monthKey: row.monthKey,
+        monthLabel: row.monthLabel,
+        sales: 0,
+        monthlyValue: 0,
+        firstMonthCommission: 0,
+        seventhMonthCommission: 0,
+        totalCommission: 0,
+      };
+
+      current.sales += 1;
+      current.monthlyValue += row.monthlyValue;
+      current.firstMonthCommission += row.firstMonthCommission;
+      current.seventhMonthCommission += row.seventhMonthCommission;
+      current.totalCommission += row.totalCommission;
+      monthlyMap.set(row.monthKey, current);
+    }
+
+    return {
+      rows,
+      totals,
+      monthly: Array.from(monthlyMap.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey)),
+    };
+  }, [filteredSales]);
+
   async function handleUpload(files: FileList | null) {
     if (!files || files.length === 0) {
       return;
@@ -328,6 +404,33 @@ export function DashboardClient({ data }: { data: DashboardData }) {
           <StatCard title="Saldo Pendente" value={formatCurrency(summary.totals.installmentRemaining)} hint={`${summary.totals.pendingRatio.toFixed(1)}% do a prazo ainda aberto.`} tone="border-white/55 bg-white/80" />
         </section>
 
+        <section className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={() => setActiveView("operacao")}
+            className={`rounded-full px-5 py-3 text-sm font-medium transition ${
+              activeView === "operacao"
+                ? "bg-slate-950 text-white shadow-lg"
+                : "bg-white text-slate-700 shadow-[0_10px_30px_rgba(15,23,42,0.08)]"
+            }`}
+          >
+            Visao operacional
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveView("comissionamento")}
+            className={`rounded-full px-5 py-3 text-sm font-medium transition ${
+              activeView === "comissionamento"
+                ? "bg-slate-950 text-white shadow-lg"
+                : "bg-white text-slate-700 shadow-[0_10px_30px_rgba(15,23,42,0.08)]"
+            }`}
+          >
+            Aba de comissionamento
+          </button>
+        </section>
+
+        {activeView === "operacao" ? (
+          <>
         <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
           <article className="rounded-[32px] border border-slate-200/70 bg-white/85 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.06)] backdrop-blur">
             <div className="flex items-end justify-between gap-4">
@@ -491,6 +594,129 @@ export function DashboardClient({ data }: { data: DashboardData }) {
             </article>
           ) : null}
         </section>
+          </>
+        ) : (
+          <>
+            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <StatCard
+                title="Base mensal"
+                value={formatCurrency(commission.totals.monthlyValue)}
+                hint="Soma das mensalidades base calculadas como venda dividida por 12."
+                tone="border-white/55 bg-white/80"
+              />
+              <StatCard
+                title="Comissao 1a mensalidade"
+                value={formatCurrency(commission.totals.firstMonthCommission)}
+                hint="35% no a vista/cartao e 20% nas vendas a prazo."
+                tone="border-white/55 bg-white/80"
+              />
+              <StatCard
+                title="Comissao 7a mensalidade"
+                value={formatCurrency(commission.totals.seventhMonthCommission)}
+                hint="10% da 7a mensalidade para vendas a prazo."
+                tone="border-white/55 bg-white/80"
+              />
+              <StatCard
+                title="Comissao total"
+                value={formatCurrency(commission.totals.totalCommission)}
+                hint="Total potencial de comissionamento do recorte filtrado."
+                tone="border-white/55 bg-white/80"
+              />
+            </section>
+
+            <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+              <article className="rounded-[32px] border border-slate-200/70 bg-white/85 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.06)] backdrop-blur">
+                <p className="text-sm font-medium uppercase tracking-[0.2em] text-slate-500">Comissao por mes</p>
+                <h2 className="mt-2 text-2xl font-semibold text-slate-950">Resumo mensal de comissionamento</h2>
+                <div className="mt-6 space-y-4">
+                  {commission.monthly.map((month) => (
+                    <div key={month.monthKey} className="rounded-[24px] bg-slate-50 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-lg font-semibold text-slate-900">{month.monthLabel}</p>
+                          <p className="text-sm text-slate-500">{formatInteger(month.sales)} vendas</p>
+                        </div>
+                        <p className="text-lg font-semibold text-slate-950">{formatCurrency(month.totalCommission)}</p>
+                      </div>
+                      <div className="mt-4 grid gap-2 text-sm text-slate-600 sm:grid-cols-3">
+                        <p>Base: {formatCurrency(month.monthlyValue)}</p>
+                        <p>1a mensalidade: {formatCurrency(month.firstMonthCommission)}</p>
+                        <p>7a mensalidade: {formatCurrency(month.seventhMonthCommission)}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+
+              <article className="rounded-[32px] border border-slate-200/70 bg-white/85 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.06)] backdrop-blur">
+                <p className="text-sm font-medium uppercase tracking-[0.2em] text-slate-500">Regras aplicadas</p>
+                <h2 className="mt-2 text-2xl font-semibold text-slate-950">Como a comissao foi calculada</h2>
+                <div className="mt-6 grid gap-4">
+                  <div className="rounded-[24px] bg-emerald-50 p-5">
+                    <p className="text-sm uppercase tracking-[0.2em] text-emerald-700">A vista, misto e cartao</p>
+                    <p className="mt-3 text-base leading-7 text-slate-700">
+                      Venda dividida por 12 para achar a mensalidade e 35% aplicados sobre a 1a mensalidade.
+                    </p>
+                  </div>
+                  <div className="rounded-[24px] bg-amber-50 p-5">
+                    <p className="text-sm uppercase tracking-[0.2em] text-amber-700">Boleto e recorrente</p>
+                    <p className="mt-3 text-base leading-7 text-slate-700">
+                      Venda dividida por 12, com 20% na 1a mensalidade e 10% na 7a mensalidade.
+                    </p>
+                  </div>
+                  <div className="rounded-[24px] bg-sky-50 p-5">
+                    <p className="text-sm uppercase tracking-[0.2em] text-sky-700">Itororo</p>
+                    <p className="mt-3 text-base leading-7 text-slate-700">
+                      Boleto e recorrente foram removidos da analise, conforme sua regra de negocio.
+                    </p>
+                  </div>
+                </div>
+              </article>
+            </section>
+
+            <section className="rounded-[32px] border border-slate-200/70 bg-white/85 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.06)] backdrop-blur">
+              <div className="flex flex-wrap items-end justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium uppercase tracking-[0.2em] text-slate-500">Detalhamento</p>
+                  <h2 className="mt-2 text-2xl font-semibold text-slate-950">Comissao por venda</h2>
+                </div>
+                <p className="text-sm text-slate-500">Mostrando as 12 vendas mais recentes do filtro atual.</p>
+              </div>
+              <div className="mt-6 overflow-x-auto">
+                <table className="min-w-full border-separate border-spacing-y-3">
+                  <thead>
+                    <tr className="text-left text-sm text-slate-500">
+                      <th className="pb-2 pr-4 font-medium">Data</th>
+                      <th className="pb-2 pr-4 font-medium">Titulo</th>
+                      <th className="pb-2 pr-4 font-medium">Pagamento</th>
+                      <th className="pb-2 pr-4 font-medium">Mensalidade base</th>
+                      <th className="pb-2 pr-4 font-medium">1a mensalidade</th>
+                      <th className="pb-2 pr-4 font-medium">7a mensalidade</th>
+                      <th className="pb-2 font-medium">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {commission.rows
+                      .slice()
+                      .sort((a, b) => b.saleDate.localeCompare(a.saleDate))
+                      .slice(0, 12)
+                      .map((sale) => (
+                        <tr key={`${sale.unit}-${sale.id}`} className="bg-slate-50 text-sm text-slate-700">
+                          <td className="rounded-l-2xl px-4 py-4">{new Date(`${sale.saleDate}T00:00:00`).toLocaleDateString("pt-BR")}</td>
+                          <td className="px-4 py-4 font-medium text-slate-900">{sale.id}</td>
+                          <td className="px-4 py-4">{sale.paymentMethod}</td>
+                          <td className="px-4 py-4">{formatCurrency(sale.monthlyValue)}</td>
+                          <td className="px-4 py-4">{formatCurrency(sale.firstMonthCommission)}</td>
+                          <td className="px-4 py-4">{formatCurrency(sale.seventhMonthCommission)}</td>
+                          <td className="rounded-r-2xl px-4 py-4">{formatCurrency(sale.totalCommission)}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </>
+        )}
       </main>
     </div>
   );

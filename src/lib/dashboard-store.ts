@@ -240,6 +240,14 @@ function normalizePayment(rawValue: unknown) {
   };
 }
 
+function shouldIncludeSale(record: Pick<SaleRecord, "unit" | "paymentMethod">) {
+  if (record.unit !== "Itororo") {
+    return true;
+  }
+
+  return record.paymentMethod !== "Boleto" && record.paymentMethod !== "Recorrente";
+}
+
 function readSheetRowsFromBuffer(buffer: Buffer, sheetName: string, headerRowIndex: number) {
   const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
   const sheet = workbook.Sheets[sheetName];
@@ -416,13 +424,14 @@ export function parseWorkbookBuffer(params: {
 }) {
   const asOfDate = params.asOfDate ?? new Date();
 
-  if (params.unit === "Aguas Claras") {
-    return buildAguasClarasFromBuffer(params.buffer, params.fileName, asOfDate);
-  }
-  if (params.unit === "Joquei Clube") {
-    return buildJoqueiFromBuffer(params.buffer, params.fileName, asOfDate);
-  }
-  return buildItororoFromBuffer(params.buffer, params.fileName, asOfDate);
+  const parsed =
+    params.unit === "Aguas Claras"
+      ? buildAguasClarasFromBuffer(params.buffer, params.fileName, asOfDate)
+      : params.unit === "Joquei Clube"
+        ? buildJoqueiFromBuffer(params.buffer, params.fileName, asOfDate)
+        : buildItororoFromBuffer(params.buffer, params.fileName, asOfDate);
+
+  return parsed.filter(shouldIncludeSale);
 }
 
 async function readDatabaseFile() {
@@ -588,7 +597,7 @@ export async function appendUploadedWorkbook(params: {
 
 export async function getDashboardData(): Promise<DashboardData> {
   const database = await getDatabase();
-  const sales = database.sales;
+  const sales = database.sales.filter(shouldIncludeSale);
   const monthlyMap = new Map<string, MonthlySummary>();
 
   for (const sale of sales) {
